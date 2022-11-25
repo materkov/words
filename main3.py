@@ -1,31 +1,6 @@
-import json
-from navec import Navec
-from flask import Flask
-from flask import request
-import time
 import random
-
-#path = '/Users/m.materkov/Downloads/navec_hudlit_v1_12B_500K_300d_100q.tar'
-path = '/apps/words/db.tar'
-navec = Navec.load(path)
-
-#path_similar = 'result.txt'
-path_similar = '/apps/words/similar.txt'
-file_similar = open(path_similar, 'r')
-similar_lines = file_similar.readlines()
-file_similar.close()
-
-similar_dict = {}
-for line in similar_lines:
-    data = json.loads(line)
-    similar_dict[data['word']] = data['sim']
-
-#path = '/apps/words/db.tar'
-navec = Navec.load(path)
-
-app = Flask(__name__)
-
-our_epoch = 1669150800  # Thu Nov 24 2022 00:00:00 GMT+0300 (GMT+03:00)
+from navec import Navec
+import json
 
 good_words = [
     'идея', 'процедура', 'этап', 'порядок', 'сотня', 'мужик', 'магазин', 'представление', 'платье', 'книжка',
@@ -134,115 +109,46 @@ good_words = [
     'перспектива', 'база', 'занятие', 'портрет', 'ужас', 'развитие', 'князь', 'попытка', 'церковь'
 ]
 
-
-def current_game():
-    game_id = int((time.time() - our_epoch) / 86400)
-    return game_id
+path = '/Users/m.materkov/Downloads/navec_hudlit_v1_12B_500K_300d_100q.tar'
+navec = Navec.load(path)
 
 
-@app.route("/getGameState", methods=['POST', 'GET'])
-def get_game_state():
-    cur_game = current_game()
+nouns_file = open('nouns.txt', 'r')
+nouns = nouns_file.readlines()
+nouns_file.close()
 
-    games = []
-    for game_id in range(1, cur_game + 1):
-        games.append({"id": game_id})
+all_results = []
 
-    return {"response": {
-        "gameGroups": [
-            {
-                "language": "ru",
-                "games": games,
-            }
-        ]
-    }}
+good_nouns = []
+for noun in nouns:
+    noun = noun.strip(" \t\r\n")
+    good_nouns.append(noun)
 
+total_count = len(good_words)
+count = 0
+for word in good_words:
+    similar = {}
+    for noun in good_nouns:
+        if noun == word:
+            continue
+        if navec.get(noun) is None:
+            continue
 
-@app.route("/checkWord", methods=['POST', 'GET'])
-def check_word():
-    body = request.get_json(True, True)
-    if not body:
-        return {"error": "incorrect body"}
+        sim = navec.sim(word, noun)
+        if sim <= 0:
+            continue
+        similar[noun] = float(sim)
 
-    try:
-        game_id = int(body.get('gameId', ''))
-    except Exception:
-        game_id = 0
+    similar = dict(reversed(sorted(similar.items(), key=lambda item: item[1])))
 
-    if game_id <= 0 or game_id > current_game():
-        return {"error": "incorrect gameId"}
+    all_results.append({
+        "word": word,
+        "similar": list(similar.keys()),
+    })
 
-    word = str(body.get('wordValue', '')).strip()
-    if word == "":
-        return {"error": "empty word"}
+    count += 1
+    print(count/total_count*100)
 
-    if navec.get(word) is None:
-        return {"response": {"score": 0, "status": "NOT_FOUND"}}
-
-    if word == good_words[current_game()]:
-        return {"response": {"score": 1, "status": "WIN"}}
-
-    similarity = float(navec.sim(good_words[current_game()], word))
-    if similarity < 0:
-        similarity = 0
-
-    return {"response": {"score": similarity, "status": "SIMILAR"}}
-
-
-@app.route("/giveUp", methods=['POST'])
-def give_up():
-    body = request.get_json(True, True)
-    if not body:
-        return {"error": "incorrect body"}
-
-    try:
-        game_id = int(body.get('gameId', ''))
-    except Exception:
-        game_id = 0
-
-    if game_id <= 0 or game_id > current_game():
-        return {"error": "incorrect gameId"}
-
-    return {"response": {"word": {"value": good_words[game_id], "score": 1}}}
-
-
-@app.route("/getTip", methods=['POST'])
-def get_tip():
-    body = request.get_json(True, True)
-    if not body:
-        return {"error": "incorrect body"}
-
-    try:
-        game_id = int(body.get('gameId', ''))
-    except Exception:
-        game_id = 0
-
-    if game_id <= 0 or game_id > current_game():
-        return {"error": "incorrect gameId"}
-
-    try:
-        tip_number = int(body.get('tipNumber', ''))
-    except Exception:
-        tip_number = 0
-
-    if tip_number < 1 or tip_number > 50:
-        return {"error": "incorrect tipNumber"}
-
-    current_word = good_words[current_game()]
-
-    shuffled_similar = list(similar_dict[current_word].keys())
-    random.Random(game_id).shuffle(shuffled_similar)
-
-    tip_word = shuffled_similar[tip_number-1]
-
-    return {"response": {"word": {
-        "value": tip_word,
-        "score": similar_dict[current_word][tip_word]
-    }}}
-
-
-@app.after_request
-def add_header(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-    return response
+f = open('results2.txt', 'w')
+f.write(json.dumps(all_results))
+f.close()
